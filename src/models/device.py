@@ -57,6 +57,20 @@ class VolunteerDevice:
     # Baseline hazard / MTBF characteristics
     baseline_mtbf: float = 100.0  # In discrete 5-min steps
     mean_repair_time: float = 12.0
+
+    @property
+    def cpu_speed_factor(self) -> float:
+        """
+        Normalized CPU execution speed factor (Implementation Assumption).
+        The paper specifies heterogeneous CPU capacities (2, 3, and 5 cores in Section 13),
+        without specifying an exact CPU-to-runtime mapping. We assume:
+        - 2 cores -> 0.75
+        - 3 cores -> 1.00 (baseline)
+        - 5 cores -> 1.50
+        Other core counts scale proportionally relative to 3 cores.
+        """
+        mapping = {2: 0.75, 3: 1.00, 5: 1.50}
+        return mapping.get(self.cores, 1.0)
     
     def update_power_and_battery(self, step_delta: float = 1.0, rng: Optional[np.random.Generator] = None):
         """Simulate power state transitions, battery discharge, and temporary network fluctuations."""

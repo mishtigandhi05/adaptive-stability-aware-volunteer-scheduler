@@ -7,7 +7,7 @@ L3 genuinely represents Cloud Fallback when risk R >= R3.
 from typing import List, Optional, Tuple, Dict
 from src.config import ExecutionThresholds, HazardConfig
 from src.models.device import VolunteerDevice
-from src.models.task import Task, TaskState, ReplicaInstance
+from src.models.task import Task, TaskState, ReplicaInstance, ExecutionRole, calculate_checkpoint_transfer_steps
 from src.models.checkpoint import Checkpoint
 from src.risk.survival import calculate_interruption_risk
 
@@ -32,8 +32,9 @@ def evaluate_and_update_task_risk(
         return task.execution_level, None
         
     # 1. Observe current device state & estimate remaining execution time tau
-    remaining_fraction = max(0.0, 1.0 - task.completed_progress)
-    remaining_steps = remaining_fraction * task.expected_duration_steps
+    # Uses authoritative shared get_remaining_steps calculation incorporating CPU speed
+    speed_factor = primary_device.cpu_speed_factor if primary_device is not None else 1.0
+    remaining_steps = task.get_remaining_steps(speed_factor)
     
     # 2. Compute R_i(tau)
     risk = calculate_interruption_risk(primary_device, remaining_steps, hazard_config)
@@ -48,6 +49,17 @@ def evaluate_and_update_task_risk(
         progress_delta = task.completed_progress - task.latest_checkpoint.completed_fraction
         return progress_delta >= 0.15  # At least 15% progress advance since last checkpoint
     
+    # Helper: Checkpoint creation with primary transfer overhead accounting
+    def do_checkpoint():
+        ckpt = task.add_checkpoint(current_step)
+        # Account for checkpoint upload overhead on the active primary replica
+        if primary_device is not None:
+            tx_steps = calculate_checkpoint_transfer_steps(100.0, primary_device.uplink_mbps)
+            primary_rep = next((r for r in task.replicas if r.active and r.role == ExecutionRole.PRIMARY), None)
+            if primary_rep is not None:
+                primary_rep.transfer_remaining_steps += tx_steps
+        return ckpt
+    
     # 3. Algorithm 1 Threshold Comparison
     if risk < thresholds.R1:
         # L0 - Normal execution
@@ -56,17 +68,17 @@ def evaluate_and_update_task_risk(
         # L1 - Checkpointed execution
         task.execution_level = 1
         if prev_level < 1 or should_checkpoint():
-            task.add_checkpoint(current_step)
+            do_checkpoint()
     elif risk < thresholds.R3:
         # L2 - Checkpoint-seeded volunteer hedging
         task.execution_level = 2
         ckpt = task.latest_checkpoint
         if prev_level < 2 or should_checkpoint():
-            ckpt = task.add_checkpoint(current_step)
+            ckpt = do_checkpoint()
             
         # Check if volunteer hedge is already active
         has_volunteer_hedge = any(
-            r.active and not r.is_cloud and r.replica_id.startswith("hedge_vol")
+            r.active and not r.is_cloud and r.role == ExecutionRole.HEDGE
             for r in task.replicas
         )
         if not has_volunteer_hedge and hedge_selector is not None:
@@ -74,58 +86,67 @@ def evaluate_and_update_task_risk(
             candidate = hedge_selector([primary_device], available_devices, task)
             if candidate is not None:
                 start_q = ckpt.completed_fraction if ckpt is not None else task.completed_progress
+                tx_steps = calculate_checkpoint_transfer_steps(100.0, candidate.uplink_mbps) if ckpt is not None else 0.0
                 new_replica = ReplicaInstance(
                     replica_id=f"hedge_vol_{candidate.device_id}",
                     device_id=candidate.device_id,
                     is_cloud=False,
+                    role=ExecutionRole.HEDGE,
                     start_step=current_step,
                     start_progress=start_q,
                     current_progress=start_q,
-                    active=True
+                    active=True,
+                    transfer_remaining_steps=tx_steps
                 )
                 task.replicas.append(new_replica)
-                task.replica_launches_count += 1
+                task.additional_replicas_count += 1
     else:
         # L3 - Cloud fallback when volunteer protection is insufficient (R >= R3)
         task.execution_level = 3
         ckpt = task.latest_checkpoint
         if prev_level < 3 or should_checkpoint():
-            ckpt = task.add_checkpoint(current_step)
+            ckpt = do_checkpoint()
             
-        has_cloud_replica = any(r.active and r.is_cloud for r in task.replicas)
+        has_cloud_replica = any(r.active and (r.is_cloud or r.role == ExecutionRole.CLOUD) for r in task.replicas)
         
         if not has_cloud_replica:
             start_q = ckpt.completed_fraction if ckpt is not None else task.completed_progress
             if use_cloud_fallback:
-                # Directly initiate cloud fallback execution from checkpoint
+                # Cloud uplink is assumed high capacity (100 Mbps)
+                tx_steps = calculate_checkpoint_transfer_steps(100.0, 100.0) if ckpt is not None else 0.0
                 new_replica = ReplicaInstance(
                     replica_id="cloud_fallback",
                     device_id=None,
                     is_cloud=True,
+                    role=ExecutionRole.CLOUD,
                     start_step=current_step,
                     start_progress=start_q,
                     current_progress=start_q,
-                    active=True
+                    active=True,
+                    transfer_remaining_steps=tx_steps
                 )
                 task.replicas.append(new_replica)
-                task.replica_launches_count += 1
+                task.additional_replicas_count += 1
             else:
                 # Cloud fallback disabled -> fallback to volunteer hedge if possible
-                has_volunteer_hedge = any(r.active and not r.is_cloud and r.replica_id != "primary" for r in task.replicas)
+                has_volunteer_hedge = any(r.active and not r.is_cloud and r.role == ExecutionRole.HEDGE for r in task.replicas)
                 if not has_volunteer_hedge and hedge_selector is not None:
                     candidate = hedge_selector([primary_device], available_devices, task)
                     if candidate is not None:
+                        tx_steps = calculate_checkpoint_transfer_steps(100.0, candidate.uplink_mbps) if ckpt is not None else 0.0
                         new_replica = ReplicaInstance(
                             replica_id=f"hedge_vol_{candidate.device_id}",
                             device_id=candidate.device_id,
                             is_cloud=False,
+                            role=ExecutionRole.HEDGE,
                             start_step=current_step,
                             start_progress=start_q,
                             current_progress=start_q,
-                            active=True
+                            active=True,
+                            transfer_remaining_steps=tx_steps
                         )
                         task.replicas.append(new_replica)
-                        task.replica_launches_count += 1
+                        task.additional_replicas_count += 1
             
     return task.execution_level, new_replica
 

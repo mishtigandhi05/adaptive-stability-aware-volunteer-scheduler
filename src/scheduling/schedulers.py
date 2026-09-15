@@ -23,7 +23,8 @@ class BaseScheduler(ABC):
     def select_primary(
         self,
         task: Task,
-        available_devices: List[VolunteerDevice]
+        available_devices: List[VolunteerDevice],
+        current_step: Optional[float] = None
     ) -> Optional[VolunteerDevice]:
         """Select primary execution device for task dispatch."""
         pass
@@ -47,7 +48,8 @@ class CapabilityOnlyScheduler(BaseScheduler):
     def select_primary(
         self,
         task: Task,
-        available_devices: List[VolunteerDevice]
+        available_devices: List[VolunteerDevice],
+        current_step: Optional[float] = None
     ) -> Optional[VolunteerDevice]:
         capable = filter_capable_devices(available_devices, task)
         if not capable:
@@ -64,7 +66,8 @@ class CapabilityStabilityScheduler(BaseScheduler):
     def select_primary(
         self,
         task: Task,
-        available_devices: List[VolunteerDevice]
+        available_devices: List[VolunteerDevice],
+        current_step: Optional[float] = None
     ) -> Optional[VolunteerDevice]:
         capable = filter_capable_devices(available_devices, task)
         if not capable:
@@ -85,7 +88,8 @@ class IndependenceReplicationScheduler(BaseScheduler):
     def select_primary(
         self,
         task: Task,
-        available_devices: List[VolunteerDevice]
+        available_devices: List[VolunteerDevice],
+        current_step: Optional[float] = None
     ) -> Optional[VolunteerDevice]:
         capable = filter_capable_devices(available_devices, task)
         if not capable:
@@ -145,7 +149,8 @@ class AdaptiveStabilityScheduler(BaseScheduler):
     def select_primary(
         self,
         task: Task,
-        available_devices: List[VolunteerDevice]
+        available_devices: List[VolunteerDevice],
+        current_step: Optional[float] = None
     ) -> Optional[VolunteerDevice]:
         capable = filter_capable_devices(available_devices, task)
         if not capable:
@@ -153,7 +158,7 @@ class AdaptiveStabilityScheduler(BaseScheduler):
             
         if self.use_conditional_survival:
             # Rank by suitability score S_ij incorporating conditional survival P_i(tau)
-            scores = [(d, calculate_suitability_score(d, task, self.suitability_weights)) for d in capable]
+            scores = [(d, calculate_suitability_score(d, task, self.suitability_weights, current_step=current_step)) for d in capable]
             scores.sort(key=lambda x: x[1], reverse=True)
             chosen = scores[0][0]
         else:
@@ -162,9 +167,11 @@ class AdaptiveStabilityScheduler(BaseScheduler):
             
         # If dispatch levels enabled, evaluate risk R_i at dispatch time
         if self.use_dispatch_levels:
+            speed_factor = chosen.cpu_speed_factor if hasattr(chosen, "cpu_speed_factor") else 1.0
+            remaining_steps = task.get_remaining_steps(speed_factor)
             risk = calculate_interruption_risk(
                 chosen,
-                task.expected_duration_steps,
+                remaining_steps,
                 self.hazard_config if self.use_hazard_multipliers else HazardConfig(1.0, 1.0, 1.0)
             )
             if risk < self.thresholds.R1:
@@ -182,7 +189,8 @@ class AdaptiveStabilityScheduler(BaseScheduler):
         self,
         primary_set: List[VolunteerDevice],
         available_devices: List[VolunteerDevice],
-        task: Task
+        task: Task,
+        current_step: Optional[float] = None
     ) -> Optional[VolunteerDevice]:
         if self.use_co_availability:
             # Algorithm 2 Co-availability selection
@@ -194,7 +202,7 @@ class AdaptiveStabilityScheduler(BaseScheduler):
             candidates = [d for d in capable if d.device_id not in primary_ids]
             if not candidates:
                 return None
-            return max(candidates, key=lambda d: calculate_suitability_score(d, task, self.suitability_weights))
+            return max(candidates, key=lambda d: calculate_suitability_score(d, task, self.suitability_weights, current_step=current_step))
 
     def on_task_step(
         self,
@@ -213,6 +221,6 @@ class AdaptiveStabilityScheduler(BaseScheduler):
             current_step=current_step,
             thresholds=self.thresholds,
             hazard_config=self.hazard_config if self.use_hazard_multipliers else HazardConfig(1.0, 1.0, 1.0),
-            hedge_selector=self.select_hedge,
+            hedge_selector=lambda p_set, a_devs, t: self.select_hedge(p_set, a_devs, t, current_step=current_step),
             use_cloud_fallback=self.use_cloud_fallback
         )

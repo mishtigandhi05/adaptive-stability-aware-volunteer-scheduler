@@ -24,7 +24,8 @@ def filter_capable_devices(devices: List[VolunteerDevice], task: Task) -> List[V
 def calculate_suitability_score(
     device: VolunteerDevice,
     task: Task,
-    weights: SuitabilityWeights = SuitabilityWeights()
+    weights: SuitabilityWeights = SuitabilityWeights(),
+    current_step: Optional[float] = None
 ) -> float:
     """
     Calculate Task-Device Suitability score S_ij (Section 6):
@@ -39,12 +40,19 @@ def calculate_suitability_score(
     ss_i = device.stability_score
     
     # Conditional survival probability P_i(tau_j) for remaining task steps
-    remaining_fraction = max(0.0, 1.0 - task.completed_progress)
-    remaining_steps = remaining_fraction * task.expected_duration_steps
+    # Authoritative calculation incorporating device CPU speed factor
+    speed_factor = device.cpu_speed_factor if hasattr(device, "cpu_speed_factor") else 1.0
+    remaining_steps = task.get_remaining_steps(speed_factor)
     p_survival = calculate_conditional_survival(device, remaining_steps)
     
-    # Deadline suitability (speed ratio)
-    d_ij = min(1.0, task.deadline_step / max(1.0, remaining_steps))
+    # Deadline suitability based on remaining slack (Fix Item 1):
+    # remaining_time_to_deadline = max(0, deadline_step - current_step)
+    # deadline_ratio = remaining_time_to_deadline / remaining_steps
+    # d_ij = clamp(deadline_ratio, 0, 1)
+    step_now = current_step if current_step is not None else task.arrival_step
+    remaining_time_to_deadline = max(0.0, task.deadline_step - step_now)
+    deadline_ratio = remaining_time_to_deadline / max(1.0, remaining_steps)
+    d_ij = max(0.0, min(1.0, deadline_ratio))
     
     # Estimated transfer/checkpoint cost penalty
     k_ij = 0.1 if device.uplink_mbps < 10.0 else 0.02

@@ -5,7 +5,7 @@ Paper Section 17 & Table 5.
 """
 
 import copy
-from typing import Dict, List
+from typing import Dict, List, Optional
 import pandas as pd
 import numpy as np
 from src.config import ExecutionThresholds
@@ -15,7 +15,7 @@ from src.simulation.metrics import MetricCollector
 from src.scheduling.schedulers import AdaptiveStabilityScheduler
 
 
-def run_threshold_sensitivity_experiment(num_seeds: int = 300, num_devices: int = 30, num_tasks: int = 150) -> pd.DataFrame:
+def run_threshold_sensitivity_experiment(num_seeds: int = 300, num_devices: int = 30, num_tasks: Optional[int] = None) -> pd.DataFrame:
     """
     Executes Table 5 experiment:
     Threshold variations (R2, R3) keeping R1 = 0.05:

@@ -22,6 +22,12 @@ class SimConfig:
     main_seeds: int = 300
     correlated_seeds: int = 500
     
+    # Implementation assumptions (unspecified parameters)
+    # arrival_rate: homogeneous Poisson process with lambda = 0.075 tasks/step over 2880 evaluation steps (expected arrivals: 0.075 * 2880 = 216 tasks)
+    arrival_rate: float = 0.075
+    checkpoint_size_mb: float = 100.0  # 100 MB checkpoint snapshot size
+    evaluation_steps: int = 2880  # 10 days evaluation horizon (2880 steps)
+    
     # Computed properties
     @property
     def history_steps(self) -> int:
@@ -30,8 +36,7 @@ class SimConfig:
 
     @property
     def eval_steps(self) -> int:
-        # 1 week = 7 days * 24 hours * 12 steps/hour = 2016 steps
-        return self.eval_weeks * 7 * 24 * 12
+        return self.evaluation_steps
 
 
 @dataclass

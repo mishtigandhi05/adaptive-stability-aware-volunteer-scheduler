@@ -5,7 +5,7 @@ Paper Section 14 & Table 1.
 """
 
 import copy
-from typing import Dict, List
+from typing import Dict, List, Optional
 import pandas as pd
 import numpy as np
 from src.simulation.generator import generate_heterogeneous_population, generate_workload
@@ -19,7 +19,7 @@ from src.scheduling.schedulers import (
 )
 
 
-def run_main_results_experiment(num_seeds: int = 300, num_devices: int = 30, num_tasks: int = 150) -> pd.DataFrame:
+def run_main_results_experiment(num_seeds: int = 300, num_devices: int = 30, num_tasks: Optional[int] = None) -> pd.DataFrame:
     """
     Executes Table 1 experiment:
     Conditions: Stable, Moderate, High

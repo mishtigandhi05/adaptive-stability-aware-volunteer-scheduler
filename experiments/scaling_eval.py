@@ -5,7 +5,7 @@ Paper Section 18 & Table 6.
 """
 
 import copy
-from typing import Dict, List
+from typing import Dict, List, Optional
 import pandas as pd
 import numpy as np
 from src.simulation.generator import generate_heterogeneous_population, generate_workload
@@ -14,7 +14,7 @@ from src.simulation.metrics import MetricCollector
 from src.scheduling.schedulers import AdaptiveStabilityScheduler
 
 
-def run_scaling_experiment(num_seeds: int = 300, num_tasks: int = 150) -> pd.DataFrame:
+def run_scaling_experiment(num_seeds: int = 300, num_tasks: Optional[int] = None) -> pd.DataFrame:
     """
     Executes Table 6 experiment:
     Devices: 10, 20, 30, 40, 50

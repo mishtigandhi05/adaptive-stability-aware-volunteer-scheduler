@@ -4,7 +4,7 @@ Evaluates cumulative contribution of 8 pipeline components.
 Paper Section 15.
 """
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 import pandas as pd
 import numpy as np
 from src.simulation.generator import generate_heterogeneous_population, generate_workload
@@ -17,7 +17,7 @@ from src.scheduling.schedulers import (
 )
 
 
-def run_ablation_experiment(num_seeds: int = 300, num_devices: int = 30, num_tasks: int = 150) -> pd.DataFrame:
+def run_ablation_experiment(num_seeds: int = 300, num_devices: int = 30, num_tasks: Optional[int] = None) -> pd.DataFrame:
     """
     Executes Table 2 experiment:
     Configurations under High instability (8 cumulative stages):

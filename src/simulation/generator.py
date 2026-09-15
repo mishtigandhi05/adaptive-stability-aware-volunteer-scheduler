@@ -125,23 +125,43 @@ def generate_heterogeneous_population(
 
 
 def generate_workload(
-    num_tasks: int = 150,
-    total_eval_steps: int = 2016,
+    num_tasks: Optional[int] = None,
+    total_eval_steps: int = 2880,
     deadline_factor_range: Tuple[float, float] = (1.6, 3.0),
+    arrival_rate: float = 0.075,
     rng: Optional[np.random.Generator] = None
 ) -> List[Task]:
     """
-    Generate independent tasks following a Poisson arrival process (Section 13).
-    Deadlines are selected between 1.6x and 3.0x expected execution time.
+    Generate independent tasks following a homogeneous Poisson arrival process (Section 13).
+    
+    Implementation Assumption:
+    - Task arrivals follow a Poisson process using exponentially distributed inter-arrival times:
+      interarrival ~ Exponential(mean = 1 / arrival_rate)
+    - Default arrival_rate = 0.075 tasks/step across total_eval_steps = 2,880 evaluation steps (10 days).
+      Expected arrivals: 0.075 * 2880 = 216 tasks.
+    - When num_tasks is None (default), the realized number of arrivals varies naturally according to the
+      Poisson process over the evaluation horizon [0, total_eval_steps).
+    - If num_tasks is explicitly provided, generation stops after reaching num_tasks.
+    - Deadlines sampled in [1.6, 3.0] x expected execution duration (Section 13).
     """
     if rng is None:
         rng = np.random.default_rng(42)
         
-    # Poisson arrivals spread over evaluation steps
-    arrival_times = np.sort(rng.uniform(0, total_eval_steps * 0.75, size=num_tasks))
+    arrival_times = []
+    current_time = 0.0
+    mean_interarrival = 1.0 / max(1e-6, float(arrival_rate))
+    
+    while True:
+        interarrival = float(rng.exponential(scale=mean_interarrival))
+        current_time += interarrival
+        if current_time >= total_eval_steps:
+            break
+        if num_tasks is not None and len(arrival_times) >= num_tasks:
+            break
+        arrival_times.append(current_time)
     
     tasks = []
-    for j in range(num_tasks):
+    for j, arr_time in enumerate(arrival_times):
         cores_req = int(rng.choice([2, 3]))
         ram_req = float(rng.choice([4.0, 8.0]))
         uplink_req = float(rng.choice([1.0, 10.0]))
@@ -157,7 +177,7 @@ def generate_workload(
             req_uplink_mbps=uplink_req,
             expected_duration_steps=duration,
             deadline_factor=deadline_factor,
-            arrival_step=float(arrival_times[j])
+            arrival_step=float(arr_time)
         )
         tasks.append(task)
         
